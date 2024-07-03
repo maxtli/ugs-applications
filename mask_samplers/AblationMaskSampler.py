@@ -40,7 +40,7 @@ class SingleComponentMaskSampler(torch.nn.Module):
 
                 self.sampled_mask[k].append(mask)
                 start += n
-        
+
     def forward(self):
         return 0, {}
 
@@ -49,9 +49,9 @@ class SingleComponentMaskSampler(torch.nn.Module):
 
 # for gradient sampling
 class MultiComponentMaskSampler(torch.nn.Module):
-    def __init__(self, pruning_cfg, prop_sample=0.1):
+    def __init__(self, pruning_cfg):
         super().__init__()
-        
+
         self.sampled_mask = None
 
         self.use_temperature = False
@@ -63,36 +63,38 @@ class MultiComponentMaskSampler(torch.nn.Module):
         self.n_heads = pruning_cfg.n_heads
         self.device = pruning_cfg.device
 
-        self.prop_sample = prop_sample
+        self.k = pruning_cfg.k
 
         self.mask_perturb = torch.nn.ParameterDict({
             "attn": torch.nn.ParameterList([
-                torch.nn.Parameter(torch.zeros((self.n_heads,)).to(self.device)) 
+                torch.nn.Parameter(torch.zeros((self.n_heads,)).to(self.device))
                 for i in range(self.n_layers)
             ]),
             "mlp": torch.nn.ParameterList([
-                torch.nn.Parameter(torch.zeros((1,)).to(self.device)) 
+                torch.nn.Parameter(torch.zeros((1,)).to(self.device))
                 for i in range(self.n_layers)
             ])
         })
 
     def forward(self):
-        bsz = self.pruning_cfg.bsz * self.pruning_cfg.n_samples
+        bsz = self.pruning_cfg.batch_size * self.pruning_cfg.n_samples
 
         total_heads = self.n_layers * self.n_heads
-        sampled_heads = math.ceil(self.prop_sample * total_heads)
+        sampled_heads = self.k
 
         # select random subset
         ref_idx = torch.arange(bsz).unsqueeze(-1).repeat(1, sampled_heads)
         _, top_k_idx = torch.rand((bsz, total_heads)).topk(sampled_heads, dim=-1)
 
-        attn_mask = torch.ones((bsz, total_heads))
+        attn_mask = torch.ones((bsz, total_heads)).to(self.device)
         attn_mask[ref_idx.flatten(), top_k_idx.flatten()] = 0
+
         attn_mask = attn_mask + (1-attn_mask) * (
-            torch.rand_like(attn_mask) + 
-            torch.stack(self.mask_perturb['attn'], dim=0).flatten()
+            torch.rand_like(attn_mask).to(self.device) +
+            torch.stack([param for param in self.mask_perturb['attn']], dim=0).flatten()
         )
-        attn_mask = attn_mask.unflatten(1, (self.n_layers, -1)).to(self.device)
+
+        attn_mask = attn_mask.unflatten(1, (self.n_layers, -1))
 
         self.sampled_mask = {
             "attn": [
@@ -100,7 +102,7 @@ class MultiComponentMaskSampler(torch.nn.Module):
                 for i in range(self.n_layers)
             ],
             "mlp": [
-                torch.ones((bsz,1)).to(self.device) 
+                torch.ones((bsz)).to(self.device)
                 for i in range(self.n_layers)
             ]
         }
