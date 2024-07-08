@@ -18,10 +18,8 @@ class Pruner(torch.nn.Module):
                  model, 
                  pruning_cfg, 
                  mask_sampler, 
-
                  # run the clean and ablated runs at the same time
                  parallel_inference=False, 
-
                  # ABLATION TYPE PARAMS
                  # do we pass in counterfactual inputs to do patching?
                  counterfactual_mode=False, 
