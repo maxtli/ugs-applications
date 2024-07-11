@@ -70,13 +70,25 @@ class MultiComponentMaskSampler(torch.nn.Module):
                 torch.nn.Parameter(torch.zeros((self.n_heads,)).to(self.device))
                 for i in range(self.n_layers)
             ]),
+            "k": torch.nn.ParameterList([
+                torch.nn.Parameter(torch.zeros((self.n_heads,)).to(self.device))
+                for i in range(self.n_layers)
+            ]),
+            "q": torch.nn.ParameterList([
+                torch.nn.Parameter(torch.zeros((self.n_heads,)).to(self.device))
+                for i in range(self.n_layers)
+            ]),
+            "v": torch.nn.ParameterList([
+                torch.nn.Parameter(torch.zeros((self.n_heads,)).to(self.device))
+                for i in range(self.n_layers)
+            ]),
             "mlp": torch.nn.ParameterList([
                 torch.nn.Parameter(torch.zeros((1,)).to(self.device))
                 for i in range(self.n_layers)
             ])
         })
 
-    def forward(self):
+    def sample_attn_mask(self):
         bsz = self.pruning_cfg.batch_size * self.pruning_cfg.n_samples
 
         total_heads = self.n_layers * self.n_heads
@@ -88,19 +100,78 @@ class MultiComponentMaskSampler(torch.nn.Module):
 
         attn_mask = torch.ones((bsz, total_heads)).to(self.device)
         attn_mask[ref_idx.flatten(), top_k_idx.flatten()] = 0
-
+       
         attn_mask = attn_mask + (1-attn_mask) * (
             torch.rand_like(attn_mask).to(self.device) +
-            torch.stack([param for param in self.mask_perturb['attn']], dim=0).flatten()
+            torch.stack([param for param in self.mask_perturb["attn"]], dim=0).flatten()
         )
 
         attn_mask = attn_mask.unflatten(1, (self.n_layers, -1))
+        return attn_mask
+    
+    def sample_kqv_mask(self):
+        bsz = self.pruning_cfg.batch_size * self.pruning_cfg.n_samples 
+
+        total_heads = self.n_layers * self.n_heads * 3
+        sampled_heads = self.k
+
+        # select random subset
+        ref_idx = torch.arange(bsz).unsqueeze(-1).repeat(1, sampled_heads)
+        _, top_k_idx = torch.rand((bsz, total_heads)).topk(sampled_heads, dim=-1)
+
+        attn_mask = torch.ones((bsz, total_heads)).to(self.device)
+        attn_mask[ref_idx.flatten(), top_k_idx.flatten()] = 0
+
+        attn_mask = attn_mask.unflatten(1, (3, -1))
+        
+
+        k_mask = attn_mask[:,0]
+        q_mask = attn_mask[:,1]
+        v_mask = attn_mask[:,2]
+
+        k_mask = (k_mask + (1-k_mask) * (
+            torch.rand_like(k_mask).to(self.device) +
+            torch.stack([param for param in self.mask_perturb["k"]], dim=0).flatten()
+        )).unflatten(1, (self.n_layers, -1))
+
+        q_mask = (q_mask + (1-q_mask) * (
+            torch.rand_like(q_mask).to(self.device) +
+            torch.stack([param for param in self.mask_perturb["q"]], dim=0).flatten()
+        )).unflatten(1, (self.n_layers, -1))
+
+        v_mask = (v_mask + (1-v_mask) * (
+            torch.rand_like(v_mask).to(self.device) +
+            torch.stack([param for param in self.mask_perturb["v"]], dim=0).flatten()
+        )).unflatten(1, (self.n_layers, -1))
+
+        return k_mask,q_mask,v_mask
+
+
+
+    def forward(self):
+        bsz = self.pruning_cfg.batch_size * self.pruning_cfg.n_samples
+        attn_mask = self.sample_attn_mask()
+        k_mask,q_mask,v_mask = self.sample_kqv_mask()
+
 
         self.sampled_mask = {
             "attn": [
                 attn_mask[:, i]
                 for i in range(self.n_layers)
             ],
+            "k": [
+                k_mask[:,i]
+                for i in range(self.n_layers)
+            ],
+            "q": [
+                q_mask[:,i]
+                for i in range(self.n_layers)
+            ],
+            "v": [
+                v_mask[:,i]
+                for i in range(self.n_layers)
+            ],
+
             "mlp": [
                 torch.ones((bsz)).to(self.device)
                 for i in range(self.n_layers)

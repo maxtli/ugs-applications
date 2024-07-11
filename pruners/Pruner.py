@@ -59,10 +59,17 @@ class Pruner(torch.nn.Module):
         self.seq_len = None
 
     def reset_parameters(self, init_modes):
-        init_modes_attention, init_modes_mlp = init_modes
+        init_modes_k, init_modes_q, init_modes_v, init_modes_attention, init_modes_mlp = init_modes
+        self.modal_k = torch.nn.Parameter(init_modes_k.clone())
+        self.modal_q = torch.nn.Parameter(init_modes_q.clone())
+        self.modal_v = torch.nn.Parameter(init_modes_v.clone())
         self.modal_attention = torch.nn.Parameter(init_modes_attention.clone())
         self.modal_mlp = torch.nn.Parameter(init_modes_mlp.clone())
-        self.null_vals = {'attn': self.modal_attention, 'mlp': self.modal_mlp}
+        self.null_vals = {'k': self.modal_k,
+                          'q': self.modal_q,
+                          'v': self.modal_v,
+                          'attn': self.modal_attention,
+                          'mlp': self.modal_mlp}
         columns =  ['kl_loss', *self.mask_sampler.log_columns]
         self.log = LinePlot(columns)
 
